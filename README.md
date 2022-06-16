@@ -1,6 +1,16 @@
 # AESEncryptor
 Simple AES CBC Encryption example
 
+## Installation
+You can install the binary with:
+```sh
+go install github.com/Etwodev/AESEncryptor@latest
+```
+Or install the library with:
+```sh
+go get github.com/Etwodev/AESEncryptor@latest
+```
+
 
 ## Usage
 The following command will decrypt the file 'random.bytes' with the key '554954704169383270484157776E7A71' and mask '48524D4377506F6E4A4C49423357436C'
