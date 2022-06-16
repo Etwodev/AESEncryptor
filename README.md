@@ -29,3 +29,14 @@ If you want to just encrypt a file from no mask, you can do the following:
 ~/go/bin/AESEncryptor -i './out.bin' -o './encrypted.bytes' -k '554954704169383270484157776E7A71' -s 1
 ```
 
+```sh
+user@some_local_user ~ % ~/go/bin/AESEncryptor -h
+Usage: AESEncryptor [-h] [-i str] [-k str] [-m str] [-o str] [-s int] [-v str] [parameters ...]
+ -h, --help        displays help
+ -i, --input=str   The input file
+ -k, --key=str     The input file
+ -m, --mask=str    The AES mask in hexadecimal (Optional)
+ -o, --output=str  The output file path
+ -s, --state=int   Whether the data is encrypted (0) or decrypted (1)
+ -v, --vect=str    The AES init vector in hexadecimal (Optional)
+ ```
