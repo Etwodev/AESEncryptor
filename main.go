@@ -23,11 +23,15 @@ type AESForm struct {
 
 
 func (a *AESForm) Decrypt() error {
-	iv, err := IVFromMask(a.mask, a.file[:aes.BlockSize])
-	if err != nil {
-		return fmt.Errorf("Decrypt: failed generating IV: %w", err)
+	if a.mask == nil {
+		a.iv = a.file[:aes.BlockSize]
 	} else {
-		a.iv = iv
+		iv, err := IVFromMask(a.mask, a.file[:aes.BlockSize])
+		if err != nil {
+			return fmt.Errorf("Decrypt: failed generating IV: %w", err)
+		} else {
+			a.iv = iv
+		}
 	}
 
 	block, err := aes.NewCipher(a.key)
