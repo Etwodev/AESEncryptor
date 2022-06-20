@@ -14,6 +14,7 @@ import (
 
 type AESForm struct {
 	state int
+	sign int
 	key []byte
 	iv []byte
 	masked_iv []byte
@@ -95,6 +96,67 @@ func (a *AESForm) Encrypt() error {
 	return nil
 }
 
+func (a *AESForm) DecryptWithSign() error {
+	if a.mask == nil {
+		a.iv = a.file[128:128 + aes.BlockSize]
+	} else {
+		iv, err := IVFromMask(a.mask, a.file[a.sign:a.sign + aes.BlockSize])
+		if err != nil {
+			return fmt.Errorf("Decrypt: failed generating IV: %w", err)
+		} else {
+			a.iv = iv
+		}
+	}
+
+	block, err := aes.NewCipher(a.key)
+	if err != nil {
+		return fmt.Errorf("Decrypt: failed creating cipher: %w", err)
+	}
+
+	if len(a.file) < aes.BlockSize {
+		return fmt.Errorf("Decrypt: ciphertext is too short")
+	}
+
+	ciphertext := a.file[aes.BlockSize + a.sign:]
+
+	if len(ciphertext)%aes.BlockSize != 0 {
+		return fmt.Errorf("Decrypt: ciphertext is not a multiple of the block size")
+	}
+
+	mode := cipher.NewCBCDecrypter(block, a.iv)
+	mode.CryptBlocks(ciphertext, ciphertext)
+	a.file = ciphertext
+	a.state = 1
+	return nil
+}
+
+
+func (a *AESForm) EncryptWithSign() error {
+	block, err := aes.NewCipher(a.key)
+	if err != nil {
+		return fmt.Errorf("Encrypt: failed creating cipher: %w", err)
+	}
+
+	if len(a.file)%aes.BlockSize != 0 {
+		return fmt.Errorf("Encrypt: item is not a multiple of the block size")
+    }
+
+	if a.mask != nil {
+		a.masked_iv, err = IVFromMask(a.mask, a.iv)
+		if err != nil {
+			return fmt.Errorf("Encrypt: failed masking iv: %w", err)
+		}
+	} else {
+		a.masked_iv = a.iv
+	}
+
+	mode := cipher.NewCBCEncrypter(block, a.iv)
+	mode.CryptBlocks(a.file, a.file)
+	a.file = []byte(string(a.file[:a.sign]) + string(a.masked_iv) + string(a.file))
+	a.state = 0
+	return nil
+}
+
 // New() expects strings formatted in hex for the following values:
 // key string -> hex.DecodeString -> []byte
 // iv string -> hex.DecodeString -> []byte
@@ -103,7 +165,7 @@ func (a *AESForm) Encrypt() error {
 // 0 (Encrypted) -> Decrypt
 // 1 (Decrypted) -> Encrypt
 // Where path is the path of the file to be read
-func New(state int, path string, key string, iv string, mask string) (AESForm, error) {
+func New(state int, sign int, path string, key string, iv string, mask string) (AESForm, error) {
 	var par AESForm
 
 	file, err := ioutil.ReadFile(path)
@@ -144,6 +206,7 @@ func New(state int, path string, key string, iv string, mask string) (AESForm, e
 
 	par.state = state
 	par.key = bKey
+	par.sign = sign
 
 	return par, nil
 }
@@ -152,6 +215,7 @@ func main() {
 	var (
 		help = false
 		state = -1
+		sign = 128
 		key = ""
 		input = ""
 		output = "~/out.bin"
@@ -160,7 +224,8 @@ func main() {
 	)
 	
 	flag.BoolVarLong(&help, "help", 'h', "displays help")
-	flag.IntVarLong(&state, "state", 's', "Whether the data is encrypted (0) or decrypted (1)", "int")
+	flag.IntVarLong(&state, "state", 's', "Whether the data is encrypted (0) or decrypted (1) or encrypted with sign (2) or decrypted with sign (3)", "int")
+	flag.IntVarLong(&sign, "index", 'n', "Index of data encrypted with sign", "int")
 	flag.StringVarLong(&key, "key", 'k', "The input file", "str")
 	flag.StringVarLong(&input, "input", 'i', "The input file", "str")
 	flag.StringVarLong(&output, "output", 'o', "The output file path", "str")
@@ -193,24 +258,41 @@ func main() {
 		log.Fatal("main: output file required")
 	}
 
-	a, err := New(state, input, key, iv, mask)
+	a, err := New(state, sign, input, key, iv, mask)
 	if err != nil {
 		log.Fatalf("main: failed parsing data: %s", err)
 	} else {
-		if a.state == 0 {
+		switch a.state {
+		case 0:
 			err = a.Decrypt()
 			if err != nil {
 				log.Fatalf("main: failed decrypting data: %s", err)
 			} else {
 				log.Print("Successfully decrypted file...")
 			}
-		} else {
+		case 1:
 			err = a.Encrypt()
 			if err != nil {
 				log.Fatalf("main: failed encrypting data: %s", err)
 			} else {
 				log.Print("Successfully encrypted file...")
 			}
+		case 2:
+			err = a.DecryptWithSign()
+			if err != nil {
+				log.Fatalf("main: failed decrypting data with sign: %s", err)
+			} else {
+				log.Print("Successfully decrypted file with sign...")
+			}
+		case 3:
+			err = a.EncryptWithSign()
+			if err != nil {
+				log.Fatalf("main: failed encrypting data with sign: %s", err)
+			} else {
+				log.Print("Successfully encrypted file with sign...")
+			}
+		default:
+			log.Fatal("main: invalid state!")
 		}
 	}
 
