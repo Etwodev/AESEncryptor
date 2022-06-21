@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -22,7 +23,6 @@ type AESForm struct {
 	mask []byte
 	file []byte
 }
-
 
 func (a *AESForm) Decrypt() error {
 	if a.sign != 0 {
@@ -72,22 +72,14 @@ func (a *AESForm) Decrypt() error {
 
 	mode := cipher.NewCBCDecrypter(block, a.iv)
 	mode.CryptBlocks(ciphertext, ciphertext)
-	a.file = ciphertext
+
+	a.file, err = Unpad(ciphertext)
+	if err != nil {
+		return fmt.Errorf("Encrypt: failed unpadding file: %w", err)
+	}
+
 	a.state = 1
 	return nil
-}
-
-func IVFromMask(mask []byte, block []byte) ([]byte, error) {
-	var buff []byte
-
-	if len(mask) != len(block) {
-		return nil, fmt.Errorf("IVFromMask: mask size mismatch")
-	}
-
-	for i, v := range block {
-		buff = append(buff, mask[i]^v)
-	}
-	return buff, nil
 }
 
 func (a *AESForm) Encrypt() error {
@@ -97,7 +89,10 @@ func (a *AESForm) Encrypt() error {
 	}
 
 	if len(a.file)%aes.BlockSize != 0 {
-		return fmt.Errorf("Encrypt: item is not a multiple of the block size")
+		a.file, err = Pad(a.file, aes.BlockSize)
+		if err != nil {
+			return fmt.Errorf("Encrypt: failed padding file: %w", err)
+		} 
     }
 
 	if a.mask != nil {
@@ -116,8 +111,39 @@ func (a *AESForm) Encrypt() error {
 	} else {
 		a.file = []byte(string(a.masked_iv) + string(a.file))
 	}
+
 	a.state = 0
 	return nil
+}
+
+func Unpad(src []byte) ([]byte, error) {	
+	l := len(src)
+    if v := l-int(src[l-1]); v > 0 {
+		return src[:v], nil
+    }
+	return nil, fmt.Errorf("Unpad: unpad value is greater than file size")
+}
+
+func Pad(src []byte, multiple int) ([]byte, error) {
+	if multiple > 255 {
+		return nil, fmt.Errorf("Pad: multiple must be less than 256")
+	}
+	padding := multiple - len(src)%multiple
+	pad := bytes.Repeat([]byte{byte(padding)}, padding)
+	return append(src, pad...), nil
+}
+
+func IVFromMask(mask []byte, block []byte) ([]byte, error) {
+	var buff []byte
+
+	if len(mask) != len(block) {
+		return nil, fmt.Errorf("IVFromMask: mask size mismatch")
+	}
+
+	for i, v := range block {
+		buff = append(buff, mask[i]^v)
+	}
+	return buff, nil
 }
 
 // New() expects strings formatted in hex for the following values:
@@ -256,7 +282,6 @@ func main() {
 		log.Fatalf("main: failed writing file: %s", err)
 	}	
 }
-
 
 // If you are using this to decrypt Arknights data, then the below function
 // can be used to convert BSON data to JSON for viewability, make sure to set the sign to 128.
