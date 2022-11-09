@@ -6,30 +6,32 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 
 	flag "github.com/pborman/getopt"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type AESForm struct {
-	state int
-	sign int
-	key []byte
-	iv []byte
+	state     int
+	sign      int
+	key       []byte
+	iv        []byte
 	masked_iv []byte
-	mask []byte
-	file []byte
+	mask      []byte
+	file      []byte
 }
 
 func (a *AESForm) Decrypt() error {
 	if a.sign != 0 {
 		if a.mask == nil {
-			a.iv = a.file[128:128 + aes.BlockSize]
+			a.iv = a.file[128 : 128+aes.BlockSize]
 		} else {
-			iv, err := IVFromMask(a.mask, a.file[a.sign:a.sign + aes.BlockSize])
+			iv, err := IVFromMask(a.mask, a.file[a.sign:a.sign+aes.BlockSize])
 			if err != nil {
 				return fmt.Errorf("Decrypt: failed generating IV: %w", err)
 			} else {
@@ -61,7 +63,7 @@ func (a *AESForm) Decrypt() error {
 	var ciphertext []byte
 
 	if a.sign != 0 {
-		ciphertext = a.file[aes.BlockSize + a.sign:]
+		ciphertext = a.file[aes.BlockSize+a.sign:]
 	} else {
 		ciphertext = a.file[aes.BlockSize:]
 	}
@@ -92,8 +94,8 @@ func (a *AESForm) Encrypt() error {
 		a.file, err = Pad(a.file, aes.BlockSize)
 		if err != nil {
 			return fmt.Errorf("Encrypt: failed padding file: %w", err)
-		} 
-    }
+		}
+	}
 
 	if a.mask != nil {
 		a.masked_iv, err = IVFromMask(a.mask, a.iv)
@@ -116,11 +118,11 @@ func (a *AESForm) Encrypt() error {
 	return nil
 }
 
-func Unpad(src []byte) ([]byte, error) {	
+func Unpad(src []byte) ([]byte, error) {
 	l := len(src)
-    if v := l-int(src[l-1]); v > 0 {
+	if v := l - int(src[l-1]); v > 0 {
 		return src[:v], nil
-    }
+	}
 	return nil, fmt.Errorf("Unpad: unpad value is greater than file size")
 }
 
@@ -150,7 +152,7 @@ func IVFromMask(mask []byte, block []byte) ([]byte, error) {
 // key string -> hex.DecodeString -> []byte
 // iv string -> hex.DecodeString -> []byte
 // mask string -> hex.DecodeString -> []byte
-// States: 
+// States:
 // 0 (Encrypted) -> Decrypt
 // 1 (Decrypted) -> Encrypt
 // Where path is the path of the file to be read
@@ -179,11 +181,14 @@ func New(state int, sign int, path string, key string, iv string, mask string) (
 			return par, fmt.Errorf("New: failed decoding hex: %w", err)
 		} else {
 			par.iv = bIV
+			if state == 0 {
+				par.file = append(par.iv, par.file...)
+			}
 		}
 	} else {
 		bytes := make([]byte, aes.BlockSize)
 		if _, err := rand.Read(bytes); err != nil {
-		  log.Fatalf("New: failed generating bytes: %s", err)
+			log.Fatalf("New: failed generating bytes: %s", err)
 		}
 		par.iv = bytes
 	}
@@ -191,7 +196,7 @@ func New(state int, sign int, path string, key string, iv string, mask string) (
 	bKey, err := hex.DecodeString(key)
 	if err != nil {
 		return par, fmt.Errorf("New: failed decoding hex: %w", err)
-	} 
+	}
 
 	par.state = state
 	par.key = bKey
@@ -202,18 +207,20 @@ func New(state int, sign int, path string, key string, iv string, mask string) (
 
 func main() {
 	var (
-		help = false
-		state = -1
-		sign = 0
-		key = ""
-		input = ""
+		help   = false
+		state  = -1
+		sign   = 0
+		bson   = 0
+		key    = ""
+		input  = ""
 		output = "~/out.bin"
-		mask = ""
-		iv = ""
+		mask   = ""
+		iv     = ""
 	)
-	
+
 	flag.BoolVarLong(&help, "help", 'h', "displays help")
 	flag.IntVarLong(&state, "state", 's', "Whether the data is encrypted (0) or decrypted (1)", "int")
+	flag.IntVarLong(&bson, "bson", 'b', "Whether to enable bson output fix (1) or not (0)", "int")
 	flag.IntVarLong(&sign, "index", 'n', "Index of data encrypted with sign", "int")
 	flag.StringVarLong(&key, "key", 'k', "The input file", "str")
 	flag.StringVarLong(&input, "input", 'i', "The input file", "str")
@@ -259,7 +266,13 @@ func main() {
 			} else {
 				log.Print("Successfully decrypted file...")
 			}
+			if bson == 1 {
+				a.BsonMarshal()
+			}
 		case 1:
+			if bson == 1 {
+				a.BsonUnmarshal()
+			}
 			err = a.Encrypt()
 			if err != nil {
 				log.Fatalf("main: failed encrypting data: %s", err)
@@ -272,7 +285,7 @@ func main() {
 	}
 
 	out, err := os.Create(output)
-	if err != nil  {
+	if err != nil {
 		log.Fatalf("main: failed creating file: %s", err)
 	}
 	defer out.Close()
@@ -280,37 +293,37 @@ func main() {
 	_, err = out.Write(a.file)
 	if err != nil {
 		log.Fatalf("main: failed writing file: %s", err)
-	}	
+	}
 }
 
 // If you are using this to decrypt Arknights data, then the below function
 // can be used to convert BSON data to JSON for viewability, make sure to set the sign to 128.
 
-// func (a *AESForm) TestMarshal() error {
-// 	var raw bson.Raw = a.file[:len(a.file) - 8]
-// 	mp := make(map[string]interface{})
-// 	err := bson.Unmarshal(raw, &mp)
-// 	if err != nil {
-// 		return fmt.Errorf("TestMarshal: failed unmarshalling bson: %w", err)
-// 	}
-// 	data, err := json.Marshal(mp)
-// 	if err != nil {
-// 		return fmt.Errorf("TestMarshal: failed marshalling to json: %w", err)
-// 	}
-// 	a.file = data
-// 	return nil
-// }
+func (a *AESForm) BsonMarshal() error {
+	var raw bson.Raw = a.file
+	mp := make(map[string]interface{})
+	err := bson.Unmarshal(raw, &mp)
+	if err != nil {
+		return fmt.Errorf("TestMarshal: failed unmarshalling bson: %w", err)
+	}
+	data, err := json.Marshal(mp)
+	if err != nil {
+		return fmt.Errorf("TestMarshal: failed marshalling to json: %w", err)
+	}
+	a.file = data
+	return nil
+}
 
-// func (a *AESForm) TestUnmarshal() error {
-// 	mp := make(map[string]interface{})
-// 	err := json.Unmarshal(a.file, &mp)
-// 	if err != nil {
-// 		return fmt.Errorf("TestUnmarshal: failed unmarshalling json: %w", err)
-// 	}
-// 	data, err := bson.Marshal(mp)
-// 	if err != nil {
-// 		return fmt.Errorf("TestUnmarshal: failed marshalling to bson: %w", err)
-// 	}
-// 	a.file = data
-// 	return nil
-// }
+func (a *AESForm) BsonUnmarshal() error {
+	mp := make(map[string]interface{})
+	err := json.Unmarshal(a.file, &mp)
+	if err != nil {
+		return fmt.Errorf("TestUnmarshal: failed unmarshalling json: %w", err)
+	}
+	data, err := bson.Marshal(mp)
+	if err != nil {
+		return fmt.Errorf("TestUnmarshal: failed marshalling to bson: %w", err)
+	}
+	a.file = data
+	return nil
+}
